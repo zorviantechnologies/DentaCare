@@ -1,0 +1,307 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Clinic {
+  id                 String             @id @default(uuid())
+  name               String
+  email              String             @unique
+  phone              String?
+  address            String?
+  gstNumber          String?
+  logoUrl            String?
+  subscription       String             @default("FREE") // FREE, BASIC, PRO
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  
+  // Relations
+  users              User[]
+  patients           Patient[]
+  appointments       Appointment[]
+  treatments         Treatment[]
+  treatmentPlans     TreatmentPlan[]
+  invoices           Invoice[]
+  inventory          InventoryItem[]
+  tasks              Task[]
+  recalls            Recall[]
+  settings           ClinicSetting?
+}
+
+model User {
+  id                 String             @id @default(uuid())
+  clinicId           String
+  name               String
+  email              String             @unique
+  passwordHash       String?
+  role               String             @default("DOCTOR") // SUPER_ADMIN, OWNER, DOCTOR, ASSISTANT
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  // Relations
+  clinic             Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  appointments       Appointment[]      @relation("DoctorAppointments")
+  tasks              Task[]             @relation("AssignedTasks")
+}
+
+model ClinicSetting {
+  id                 String             @id @default(uuid())
+  clinicId           String             @unique
+  clinic             Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  primaryColor       String             @default("#3B82F6")
+  currency           String             @default("INR")
+  smsEnabled         Boolean            @default(false)
+  emailNotifications Boolean            @default(true)
+}
+
+model Patient {
+  id                 String             @id @default(uuid())
+  clinicId           String
+  patientNumber      String             // Unique per clinic, e.g. DC-0001
+  name               String
+  phone              String
+  email              String?
+  gender             String?
+  dob                DateTime?
+  address            String?
+  medicalHistory     String             @default("[]") // JSON string of medical conditions
+  allergies          String             @default("[]") // JSON string of allergies
+  emergencyContact   String?
+  emergencyPhone     String?
+  familyGroupId      String?            // To group family members
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  // Relations
+  clinic             Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  appointments       Appointment[]
+  visits             Visit[]
+  invoices           Invoice[]
+  images             PatientImage[]
+  treatmentPlans     TreatmentPlan[]
+  recalls            Recall[]
+  toothHistory       ToothHistory[]
+
+  @@unique([clinicId, patientNumber])
+}
+
+model ToothHistory {
+  id                 String             @id @default(uuid())
+  patientId          String
+  patient            Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  toothNumber        Int                // FDI Number, e.g. 11, 48
+  status             String             @default("HEALTHY") // HEALTHY, DECAYED, FILLED, etc.
+  notes              String?
+  updatedAt          DateTime           @updatedAt
+}
+
+model Appointment {
+  id                 String             @id @default(uuid())
+  clinicId           String
+  patientId          String
+  doctorId           String
+  dateTime           DateTime
+  durationMinutes    Int                @default(30)
+  status             String             @default("SCHEDULED") // SCHEDULED, CHECKED_IN, etc.
+  reason             String?
+  notes              String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  // Relations
+  clinic             Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patient            Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor             User               @relation("DoctorAppointments", fields: [doctorId], references: [id])
+}
+
+model Visit {
+  id                 String             @id @default(uuid())
+  patientId          String
+  date               DateTime           @default(now())
+  chiefComplaint     String
+  diagnosis          String?
+  clinicalNotes      String?
+  toothChartSnapshot String?            // JSON String of tooth statuses
+  createdAt          DateTime           @default(now())
+  
+  // Relations
+  patient            Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  prescription       Prescription?
+  invoice            Invoice?
+}
+
+model Prescription {
+  id                 String             @id @default(uuid())
+  visitId            String             @unique
+  doctorSignature    String?            // Doctor name or signature text
+  createdAt          DateTime           @default(now())
+
+  // Relations
+  visit              Visit              @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  items              PrescriptionItem[]
+}
+
+model PrescriptionItem {
+  id                 String             @id @default(uuid())
+  prescriptionId     String
+  medicineName       String
+  dosage             String             // e.g. 1-0-1
+  durationDays       Int
+  instructions       String?            // e.g. After food
+
+  // Relations
+  prescription       Prescription       @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+}
+
+model Treatment {
+  id                 String             @id @default(uuid())
+  clinicId           String
+  category           String             // e.g. Orthodontics, Scaling
+  name               String
+  description        String?
+  defaultCost        Float
+  isActive           Boolean            @default(true)
+
+  // Relations
+  clinic             Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+}
+
+model TreatmentPlan {
+  id                 String             @id @default(uuid())
+  clinicId           String
+  patientId          String
+  name               String
+  status             String             // e.g. Draft, Active, Completed, Cancelled
+  createdAt          DateTime           @default(now())
+
+  // Relations
+  clinic             Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patient            Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  stages             TreatmentPlanStage[]
+}
+
+model TreatmentPlanStage {
+  id                 String             @id @default(uuid())
+  treatmentPlanId    String
+  name               String             // Stage name e.g. Phase 1 - Surgical
+  order              Int
+  
+  // Relations
+  treatmentPlan      TreatmentPlan      @relation(fields: [treatmentPlanId], references: [id], onDelete: Cascade)
+  items              TreatmentPlanItem[]
+}
+
+model TreatmentPlanItem {
+  id                   String           @id @default(uuid())
+  treatmentPlanStageId String
+  treatmentName        String
+  toothNumbers         String           @default("") // Comma-separated affected teeth, e.g. "14,16"
+  cost                 Float
+  discount             Float            @default(0)
+  status               String           // e.g. Pending, Completed
+
+  // Relations
+  stage                TreatmentPlanStage @relation(fields: [treatmentPlanStageId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id                 String             @id @default(uuid())
+  clinicId           String
+  patientId          String
+  visitId            String?            @unique
+  invoiceNumber      String             // Unique per clinic
+  subtotal           Float
+  discount           Float              @default(0)
+  taxableAmount      Float
+  cgst               Float              @default(0) // CGST in %
+  sgst               Float              @default(0) // SGST in %
+  total              Float
+  balance            Float
+  paymentStatus      String             @default("UNPAID") // PAID, PARTIAL, UNPAID
+  dueDate            DateTime?
+  createdAt          DateTime           @default(now())
+
+  // Relations
+  clinic             Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patient            Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  visit              Visit?             @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  payments           Payment[]
+}
+
+model Payment {
+  id                 String             @id @default(uuid())
+  invoiceId          String
+  amount             Float
+  paymentMode        String             // CASH, UPI, CARD, CHEQUE, NET_BANKING
+  referenceNumber    String?            // Transaction ID, Cheque number etc.
+  paymentDate        DateTime           @default(now())
+
+  // Relations
+  invoice            Invoice            @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+model InventoryItem {
+  id                 String             @id @default(uuid())
+  clinicId           String
+  name               String
+  category           String             // e.g. Medicine, Equipment, Consumables
+  condition          String?            // e.g. New, Good, Needs Repair (for equipment)
+  supplier           String?
+  quantity           Int                @default(0)
+  minQuantityAlert   Int                @default(5)  // Alert if quantity falls below
+  expiryDate         DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  // Relations
+  clinic             Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+}
+
+model PatientImage {
+  id                 String             @id @default(uuid())
+  patientId          String
+  title              String
+  imageUrl           String             // Path or remote URL
+  category           String             // e.g. X-Ray, Clinical Photo, PDF Report
+  notes              String?
+  createdAt          DateTime           @default(now())
+
+  // Relations
+  patient            Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+}
+
+model Task {
+  id                 String             @id @default(uuid())
+  clinicId           String
+  title              String
+  description        String?
+  priority           String             // Low, Medium, High
+  status             String             // Todo, In Progress, Done
+  dueDate            DateTime?
+  assignedToId       String?
+  createdAt          DateTime           @default(now())
+
+  // Relations
+  clinic             Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  assignedTo         User?              @relation("AssignedTasks", fields: [assignedToId], references: [id], onDelete: SetNull)
+}
+
+model Recall {
+  id                 String             @id @default(uuid())
+  clinicId           String
+  patientId          String
+  recallType         String             // ROUTINE_CHECKUP, CLEANING, etc.
+  dueDate            DateTime
+  status             String             // Pending, Contacted, Scheduled, Cancelled
+  notes              String?
+  createdAt          DateTime           @default(now())
+
+  // Relations
+  clinic             Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patient            Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+}
